@@ -8,6 +8,7 @@
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,11 +25,24 @@ import (
 )
 
 var (
-	iocList      string
-	iocFile      string
+	// 系统变量相关
+	ioc_string   string
+	iocFileInput string
 	chunkSz      = 10 * 1024 * 1024 // 10MB
 	overlap_size = 200
+	// 调用windows api相关
+	kernel32           = windows.NewLazySystemDLL("kernel32.dll")
+	procVirtualQueryEx = kernel32.NewProc("VirtualQueryEx")
+	psapi              = windows.NewLazySystemDLL("psapi.dll")
+	// 字体颜色相关
+	boldRed    = color.New(color.FgRed).Add(color.Bold).SprintFunc()
+	boldYellow = color.New(color.FgHiYellow).Add(color.Bold).SprintFunc()
+	boldCyan   = color.New(color.FgCyan).Add(color.Bold).SprintFunc()
+	gray       = color.New(color.FgHiBlack).SprintFunc()
 )
+
+// 用于统计
+var result_count_map = make(map[string]*ProcessInfo)
 
 var skipWhitePaths = map[string]struct{}{
 	"C:\\Windows\\System32\\svchost.exe":                                                 {},
@@ -39,30 +53,32 @@ var skipWhitePaths = map[string]struct{}{
 	"C:\\Windows\\System32\\backgroundTaskHost.exe":                                      {},
 }
 
-var (
-	kernel32           = windows.NewLazySystemDLL("kernel32.dll")
-	procVirtualQueryEx = kernel32.NewProc("VirtualQueryEx")
-	psapi              = windows.NewLazySystemDLL("psapi.dll")
-)
-var boldRed = color.New(color.FgRed).Add(color.Bold).SprintFunc()
+type ProcessInfo struct {
+	Count      int
+	selfPID    uint32
+	selfPath   string
+	parentPID  uint32
+	parentName string
+	parentPath string
+	snippet    map[string]struct{}
+}
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	// flag.StringVar(&iocList, "ioc", "", "Comma-separated IOC strings to search")
-	// flag.StringVar(&iocFile, "iocfile", "", "File with IOC strings (one per line)")
-	// flag.Parse()
+	flag.StringVar(&ioc_string, "ioc", "", "Comma-separated IOC strings to search")
+	flag.StringVar(&iocFileInput, "iocfile", "", "File with IOC strings (one per line)")
+	flag.Parse()
+	if ioc_string == "" && iocFileInput == "" {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("请输入 IOC ，多个IOC以英文逗号（,）分隔, 回车确认\n")
+		ioc_string, _ = reader.ReadString('\n')
+		ioc_string = strings.TrimSpace(ioc_string)
 
-	// iocs, err := loadIOCs(iocList, iocFile)
-	reader := bufio.NewReader(os.Stdin)
+		fmt.Print("请输入 IOC 文件路径（如 \"C:\\ioc.txt）\"，或回车跳过: \n")
+		iocFileInput, _ = reader.ReadString('\n')
+		iocFileInput = strings.TrimSpace(iocFileInput)
 
-	fmt.Print("请输入 IOC ，多个IOC以英文逗号（,）分隔, 回车确认\n")
-	ioc_string, _ := reader.ReadString('\n')
-	ioc_string = strings.TrimSpace(ioc_string)
-
-	fmt.Print("请输入 IOC 文件路径（如 \"C:\\ioc.txt）\"，或回车跳过: \n")
-	iocFileInput, _ := reader.ReadString('\n')
-	iocFileInput = strings.TrimSpace(iocFileInput)
-
+	}
 	// tmp := ["aslkjdlkj.com"]
 
 	ioc_list, err := loadIOCs(ioc_string, iocFileInput)
@@ -96,6 +112,9 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("总计用时 %v\n", time.Since(t2))
+
+	fmt.Printf("IOC命中统计结果如下，详情请见上日志\n")
+	printResultMap(result_count_map)
 
 	fmt.Println("程序执行完毕。")
 	fmt.Println("按回车键退出...")
@@ -140,12 +159,12 @@ func loadIOCs(list, file string) ([]string, error) {
 
 // windowsSearch: 遍历进程, 对每个进程并发扫描其内存
 func windowsSearch(iocs []string) error {
-	t1 := time.Now()
+
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("获取镜像耗时: %v\n", time.Since(t1))
+	fmt.Printf("获取镜像完成\n")
 	defer windows.CloseHandle(snapshot)
 
 	var pe windows.ProcessEntry32
@@ -154,22 +173,26 @@ func windowsSearch(iocs []string) error {
 	process_32_err := windows.Process32First(snapshot, &pe)
 
 	type processTask struct {
-		hProc windows.Handle
-		iocs  []string
-		pid   uint32
-		pname string
-		ppath string
+		hProc      windows.Handle
+		iocs       []string
+		pid        uint32
+		pname      string
+		ppath      string
+		parentPID  uint32
+		parentName string
+		parentPath string
 	}
 	var wg sync.WaitGroup
 	workerCount := min(max(runtime.NumCPU()*2, 2), 16)
 	taskCh := make(chan processTask, workerCount*4)
 	ParentPidCounterMap := make(map[uint32]int)
 	// worker消费者
+	fmt.Printf("正在开始扫描进程\n")
 	for i := 0; i < runtime.NumCPU()*2; i++ {
 		wg.Go(func() {
 			for t := range taskCh {
 				// scanProcess(t)
-				err := scanProcessMemoryConcurrent(t.hProc, t.iocs, t.pid, t.pname, t.ppath)
+				err := scanProcessMemoryConcurrent(t.hProc, t.iocs, t.pid, t.pname, t.ppath, t.parentPID, t.parentName, t.parentPath)
 				if err != nil {
 					fmt.Printf("扫描进程 %s (PID %d) 时出错: %v\n", t.pname, t.pid, err)
 				}
@@ -208,7 +231,7 @@ func windowsSearch(iocs []string) error {
 
 		// 获取父一级进程大小size
 		var parentMem uint64
-		var parentExe string
+		var parentName string
 		var parentPath string
 		if parent_pid > 0 {
 			hParent, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_VM_READ, false, parent_pid)
@@ -219,21 +242,21 @@ func windowsSearch(iocs []string) error {
 				size := uint32(len(buf))
 				if qErr := windows.QueryFullProcessImageName(hParent, 0, &buf[0], &size); qErr == nil {
 					parentPath = syscall.UTF16ToString(buf[:size])
-					parentExe = filepath.Base(parentPath)
+					parentName = filepath.Base(parentPath)
 				} else {
-					parentExe = ""
+					parentName = ""
 					parentPath = ""
 				}
 
 				windows.CloseHandle(hParent)
 			} else {
 				parentMem = 0
-				parentExe = ""
+				parentName = ""
 				parentPath = ""
 			}
 		} else {
 			parentMem = 0
-			parentExe = ""
+			parentName = ""
 			parentPath = ""
 		}
 		ParentPidCounterMap[parent_pid]++
@@ -282,10 +305,10 @@ func windowsSearch(iocs []string) error {
 
 		// fmt.Printf("PID: %d, Parent PID: %d, Name: %s,path: %s, Mem: %.2f MB, Parent Mem: %.2f MB, 父进程名称：%s，父进程路径：%s 开始扫描内存\n",
 		// 	pid, parent_pid, pname, selfpath, float64(memSize)/1024/1024, float64(parentMem)/1024/1024, parentExe, parentPath)
-		_ = parentExe
+		// _ = parentExe
 		// 并发扫描单个进程
 		// err = scanProcessMemoryConcurrent(hProc, iocs, pid, pname, ppath)
-		taskCh <- processTask{hProc, iocs, pid, pname, selfpath}
+		taskCh <- processTask{hProc, iocs, pid, pname, selfpath, parent_pid, parentName, parentPath}
 
 		if err != nil {
 			fmt.Printf("扫描进程 %s (PID %d) 时出错: %v\n", pname, pid, err)
@@ -331,7 +354,7 @@ type task struct {
 }
 
 // scanProcessMemoryConcurrent: 为每个进程建立固定大小的 worker pool 来并行读取内存并搜索 ioc
-func scanProcessMemoryConcurrent(hProc windows.Handle, iocs []string, pid uint32, pname, ppath string) error {
+func scanProcessMemoryConcurrent(hProc windows.Handle, iocs []string, pid uint32, pname, ppath string, parentPid uint32, parentName string, parentPath string) error {
 	var memInfo windows.MemoryBasicInformation
 	var addr uintptr
 
@@ -488,14 +511,32 @@ func scanProcessMemoryConcurrent(hProc windows.Handle, iocs []string, pid uint32
 						snippet := sanitizeSnippet(buf[start:end])
 						// 将结果发送到 matches（缓冲 channel 减少阻塞）
 
-						// fmt.Fprintf(&sb, "[%s] PID=%d Name=\"%s\" Path=\"%s\" ADDR=0x%x REGION=[0x%x-0x%x] IOC=\"%s\" SNIPPET=\"%s\"", boldRed("Match"),
-						// 	pid, pname, ppath, uintptr(iocAddr), t.regionStart, t.regionEnd, ioc, snippet)
-						sb.WriteString(fmt.Sprintf("%s %s=%d %s=\"%s\" %s=\"%s\" %s=0x%x %s=[0x%x-0x%x] %s=\"%s\" %s=\"%s\"", boldRed("[Match]"), boldRed("进程ID"),
-							pid, boldRed("进程名"), pname, boldRed("路径"), ppath, boldRed("Addr"), uintptr(iocAddr), boldRed("REGION"), t.regionStart, t.regionEnd, boldRed("IoC"), ioc, boldRed("上下文"), snippet))
+						// sb.WriteString(fmt.Sprintf("%s %s=%d %s=\"%s\" %s=\"%s\" %s=0x%x %s=[0x%x-0x%x] %s=\"%s\" %s=\"%s\"", boldRed("[Match]"), boldRed("进程ID"),
+						// 	pid, boldRed("进程名"), pname, boldRed("路径"), ppath, boldRed("Addr"), uintptr(iocAddr), boldRed("REGION"), t.regionStart, t.regionEnd, boldRed("IoC"), ioc, boldRed("上下文"), snippet))
 						// matches <- fmt.Sprintf("[MATCH] PID=%d Name=\"%s\" Path=\"%s\" ADDR=0x%x REGION=[0x%x-0x%x] IOC=\"%s\" SNIPPET=\"%s\"",
 						// 	pid, pname, ppath, iocAddr, t.regionStart, t.regionEnd, ioc, snippet)
+
+						sb.WriteString(fmt.Sprintf("%s %s=%d %s=\"%s\" %s=\"%s\"\n",
+							boldRed("[Match]"),
+							boldYellow("PID"), pid,
+							boldYellow("Name"), pname,
+							boldYellow("Path"), ppath,
+						))
+
+						sb.WriteString(fmt.Sprintf("  %s=0x%x %s=[0x%x-0x%x] %s=\"%s\"\n",
+							boldCyan("ADDR"), uintptr(iocAddr),
+							boldCyan("REGION"), t.regionStart, t.regionEnd,
+							boldCyan("IOC"), ioc,
+						))
+
+						sb.WriteString(fmt.Sprintf("  %s=\"%s\"\n\n",
+							boldYellow("SNIPPET"), gray(snippet),
+						))
+
 						matches <- sb.String()
 						sb.Reset()
+
+						result_count(result_count_map, pname, pid, ppath, parentPid, parentName, parentPath, snippet)
 					}
 				}
 			}
@@ -640,4 +681,63 @@ func sanitizeSnippet(b []byte) string {
 		}
 	}
 	return string(out)
+}
+
+// type ProcessInfo struct {
+// 	Count      int
+// 	selfPID    string
+// 	selfPath   string
+// 	parentPID  string
+// 	parentPath string
+// 	snippet    string
+// }
+
+func result_count(m map[string]*ProcessInfo, selfName string, selfPID uint32, selfPath string, parentPID uint32, parentName string, parentPath string, snippet string) {
+	if info, exists := m[selfName]; exists {
+		info.Count++ // 已存在，累加
+		info.snippet[snippet] = struct{}{}
+	} else {
+
+		m[selfName] = &ProcessInfo{
+			Count:      1, // 第一次出现，初始值 1
+			selfPID:    selfPID,
+			selfPath:   selfPath,
+			parentPID:  parentPID,
+			parentName: parentName,
+			parentPath: parentPath,
+			snippet:    map[string]struct{}{snippet: {}},
+		}
+	}
+
+}
+
+func printResultMap(result_count_map map[string]*ProcessInfo) {
+	// 定义一些颜色函数
+	boldCyan := color.New(color.FgCyan, color.Bold).SprintFunc()     // 用于标题
+	boldYellow := color.New(color.FgYellow, color.Bold).SprintFunc() // 字段名
+	red := color.New(color.FgRed).SprintFunc()                       // 关键数值
+	green := color.New(color.FgGreen).SprintFunc()                   // 命中次数
+	white := color.New(color.FgWhite).SprintFunc()                   // 普通文本
+
+	for name, info := range result_count_map {
+		snippet_string := ""
+		for s := range info.snippet {
+			snippet_string = s + "\n"
+		}
+		// 打印标题和分割线
+		fmt.Println(boldCyan("-------- 进程:", name, "--------"))
+
+		// 打印详细信息，每行一类
+		fmt.Printf("%s: %s\n", boldYellow("进程名"), white(name))
+		fmt.Printf("%s: %s\n", boldYellow("PID"), red(info.selfPID))
+		fmt.Printf("%s: %s\n", boldYellow("路径"), white(info.selfPath))
+		fmt.Printf("%s: %s\n", boldYellow("命中次数"), green(info.Count))
+		fmt.Printf("%s: %s\n", boldYellow("父进程名称"), white(info.parentName))
+		fmt.Printf("%s: %s\n", boldYellow("父进程 PID"), red(info.parentPID))
+		fmt.Printf("%s: %s\n", boldYellow("父进程路径"), white(info.parentPath))
+		fmt.Printf("%s: %v\n", boldYellow("命中上下文"), white(snippet_string))
+
+		// 打印底部分割线
+		fmt.Println(boldCyan("------------------------------------------------\n"))
+	}
 }
