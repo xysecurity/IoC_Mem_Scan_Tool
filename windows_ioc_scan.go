@@ -84,7 +84,18 @@ func main() {
 
 	ioc_list, err := loadIOCs(ioc_string, iocFileInput)
 	if err != nil {
-		fmt.Println(err)
+
+		switch {
+		case strings.Contains(err.Error(), "cannot find the file"):
+			fmt.Println("未发现您输入的文件，请检查路径")
+		case strings.Contains(err.Error(), "Access is denied"):
+			fmt.Println("文件读取错误，请检查权限")
+		default:
+			fmt.Println("未知错误:", err)
+		}
+
+		fmt.Println("按回车键退出...")
+		fmt.Scanln() // 等待用户输入，防止窗口自动关闭
 	}
 	fmt.Printf("您输入的IOC为%v ", ioc_list)
 
@@ -94,6 +105,9 @@ func main() {
 	if len(ioc_list) == 0 {
 		fmt.Fprintln(os.Stderr, "No IOC provided. Use -ioc or -iocfile。 请输入IOC")
 		os.Exit(1)
+		fmt.Println("按回车键退出...")
+		fmt.Scanln() // 等待用户输入，防止窗口自动关闭
+
 	}
 
 	maxLen := 0
@@ -111,6 +125,8 @@ func main() {
 	if err := windowsSearch(ioc_list); err != nil {
 		fmt.Fprintf(os.Stderr, "search error: %v\n", err)
 		os.Exit(1)
+		fmt.Println("按回车键退出...")
+		fmt.Scanln() // 等待用户输入，防止窗口自动关闭
 	}
 	fmt.Printf("总计用时 %v\n", time.Since(t2))
 
@@ -124,9 +140,11 @@ func main() {
 
 func loadIOCs(list, file string) ([]string, error) {
 	var ioc_list []string
+
 	if file != "" {
 		f, err := os.Open(file)
 		if err != nil {
+
 			return nil, err
 		}
 		defer f.Close()
@@ -138,6 +156,7 @@ func loadIOCs(list, file string) ([]string, error) {
 			}
 		}
 		if err := sc.Err(); err != nil {
+
 			return nil, err
 		}
 	}
