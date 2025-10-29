@@ -1,10 +1,13 @@
 ﻿# IoC_Mem_Scan_Tool
-高性能的威胁情报IOC终端搜索工具，使用go语言编写，可实现指定IOC在当前主机内存下的搜索。
+高性能的威胁情报IOC Windows终端搜索工具，使用go语言编写，可实现指定IOC在当前主机内存下的搜索。
 
 底层使用Boyer-Moore-Horspool算法优化查询速度，同时使用异步协程的方式，加快整机查询速度。
 
 实测单个IOC 16G内存可在30s内完成整体检索。
 
+# 使用场景
+
+主要适用于在网络侧 NDR或IDS中检测到主机端侧存在IOC外联相关威胁行为，安服上机取证或受害者自行排查，方便基于检测出的IOC外联，快速定位存在外联的进程，从而最快完成取证和威胁发现。
 
 # 使用方式
 ##交互式方式
@@ -50,4 +53,5 @@ windows_ioc_scan.exe -ioc "baidu.com,google.com"
 windows_ioc_scan.exe -iocfile "test_ioc.txt"
 
 <img width="1709" height="391" alt="image" src="https://github.com/user-attachments/assets/fb511a63-c345-42a4-bf54-3f4abaa52467" />
+
 
