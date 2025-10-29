@@ -43,6 +43,7 @@ var (
 
 // 用于统计
 var result_count_map = make(map[string]*ProcessInfo)
+var mu sync.Mutex
 
 var skipWhitePaths = map[string]struct{}{
 	"C:\\Windows\\System32\\svchost.exe":                                                 {},
@@ -693,6 +694,8 @@ func sanitizeSnippet(b []byte) string {
 // }
 
 func result_count(m map[string]*ProcessInfo, selfName string, selfPID uint32, selfPath string, parentPID uint32, parentName string, parentPath string, snippet string) {
+	mu.Lock()
+	defer mu.Unlock()
 	if info, exists := m[selfName]; exists {
 		info.Count++ // 已存在，累加
 		info.snippet[snippet] = struct{}{}
