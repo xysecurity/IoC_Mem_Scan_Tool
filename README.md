@@ -21,3 +21,5 @@ windows_ioc_scan.exe -ioc "待查询IOC"
 windows_ioc_scan.exe -ioc "baidu.com,google.com"
 
 <img width="1697" height="587" alt="image" src="https://github.com/user-attachments/assets/7f4fd323-b87b-478f-a323-782014fbcabf" />
+
+test
