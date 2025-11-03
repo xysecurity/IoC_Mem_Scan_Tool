@@ -10,20 +10,20 @@
 主要适用于在网络侧 NDR或IDS中检测到主机端侧存在IOC外联相关威胁行为，安服上机取证或受害者自行排查，方便基于检测出的IOC外联，快速定位存在外联的进程，从而最快完成取证和威胁发现。
 
 # 使用方式
-##交互式方式
-### 交互式输入待查询IOC
+## 1、交互式方式
+### 1-1  式输入待查询IOC
 直接打开程序文件，根据提示输入IOC，按确认键输入即可
 
 <img width="852" height="328" alt="image" src="https://github.com/user-attachments/assets/b21439cd-1e1d-4503-83cc-d08226c5512c" />
 
-### 交互式输入待查询IOC文件
+### 1-2 交互式输入待查询IOC文件
 也可以将IOC存入文件中，通过换行进行分割，交互式输入框中，在提示输入待查询IOC时按回车跳过，在接下来提示输入待查询IOC文件时输入文件路径
 
 <img width="1690" height="240" alt="image" src="https://github.com/user-attachments/assets/9c49c419-25ee-4911-8117-2e84cc0b19f1" />
 
 
-## 命令行方式
-### 命令行输入待查询IOC
+## 2、命令行方式
+### 2-1  命令行输入待查询IOC
 
 windows_ioc_scan.exe -ioc "待查询IOC"
 
@@ -40,7 +40,7 @@ windows_ioc_scan.exe -ioc "baidu.com,google.com"
 
 <img width="1697" height="587" alt="image" src="https://github.com/user-attachments/assets/7f4fd323-b87b-478f-a323-782014fbcabf" />
 
-### 命令行输入待查询IOC文件
+### 2-2  命令行输入待查询IOC文件
 
 程序支持读取包含多个IOC的文件输入，文件中不同IOC通过换行进行区分。
 
@@ -53,5 +53,6 @@ windows_ioc_scan.exe -ioc "baidu.com,google.com"
 windows_ioc_scan.exe -iocfile "test_ioc.txt"
 
 <img width="1709" height="391" alt="image" src="https://github.com/user-attachments/assets/fb511a63-c345-42a4-bf54-3f4abaa52467" />
+
 
 
