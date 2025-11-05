@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/fatih/color"
@@ -46,12 +45,12 @@ var result_count_map = make(map[string]*ProcessInfo)
 var mu sync.Mutex
 
 var skipWhitePaths = map[string]struct{}{
-	"C:\\Windows\\System32\\svchost.exe":                                                 {},
-	"C:\\Windows\\System32\\ShellHost.exe":                                               {},
-	"C:\\Windows\\System32\\sihost.exe":                                                  {},
+	// "C:\\Windows\\System32\\svchost.exe":                                                 {},
+	"C:\\Windows\\System32\\ShellHost.exe": {},
+	// "C:\\Windows\\System32\\sihost.exe":                                                  {},
 	"C:\\Windows\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\SearchHost.exe": {},
-	"C:\\Windows\\explorer.exe":                                                          {},
-	"C:\\Windows\\System32\\backgroundTaskHost.exe":                                      {},
+	// "C:\\Windows\\explorer.exe":                                                          {},
+	"C:\\Windows\\System32\\backgroundTaskHost.exe": {},
 }
 
 type ProcessInfo struct {
@@ -121,14 +120,14 @@ func main() {
 	}
 
 	fmt.Printf("IOCs=%v  overlap=%d  chunk=%d platform=windows\n", ioc_list, overlap_size, chunkSz)
-	t2 := time.Now()
+	// t2 := time.Now()
 	if err := windowsSearch(ioc_list); err != nil {
 		fmt.Fprintf(os.Stderr, "search error: %v\n", err)
 		os.Exit(1)
 		fmt.Println("按回车键退出...")
 		fmt.Scanln() // 等待用户输入，防止窗口自动关闭
 	}
-	fmt.Printf("总计用时 %v\n", time.Since(t2))
+	// fmt.Printf("总计用时 %v\n", time.Since(t2))
 
 	fmt.Printf("IOC命中统计结果如下，详情请见上日志\n")
 	printResultMap(result_count_map)
@@ -187,6 +186,8 @@ func windowsSearch(iocs []string) error {
 	fmt.Printf("获取镜像完成\n")
 	defer windows.CloseHandle(snapshot)
 
+	search_process_slef_pid := uint32(os.Getpid())
+
 	var pe windows.ProcessEntry32
 	pe.Size = uint32(unsafe.Sizeof(pe))
 
@@ -227,6 +228,10 @@ func windowsSearch(iocs []string) error {
 		pid := pe.ProcessID
 		parent_pid := pe.ParentProcessID
 		pname := windows.UTF16ToString(pe.ExeFile[:])
+		if pid == search_process_slef_pid {
+			process_32_err = windows.Process32Next(snapshot, &pe)
+			continue
+		}
 
 		hProc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_VM_READ, false, pid)
 
@@ -309,6 +314,7 @@ func windowsSearch(iocs []string) error {
 			selfpath = syscall.UTF16ToString(buf[:size])
 		}
 
+		// 避免获取不到应该查询到的进程
 		if _, ok := skipWhitePaths[selfpath]; ok {
 			windows.CloseHandle(hProc)
 			process_32_err = windows.Process32Next(snapshot, &pe)
