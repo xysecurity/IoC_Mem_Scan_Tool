@@ -15,7 +15,12 @@
 
 <img width="2031" height="935" alt="image" src="https://github.com/user-attachments/assets/b4f53d0b-5680-43cc-be3c-41e22cb51f5d" />
 
-在运行银狐木马的主机中搜索银狐远控Domain
+
+在运行银狐木马的主机中搜索银狐远控Domain，银狐注入系统进程
+
+<img width="1024" height="491" alt="银狐通信截图" src="https://github.com/user-attachments/assets/9b9f55ba-28b2-40f8-abdf-a0541cb865ea" />
+
+
 
 
 # 使用方式
@@ -65,6 +70,7 @@ windows_ioc_scan.exe -iocfile "test_ioc.txt"
 程序自动完成文件中的IOC读取并检索。
 
 <img width="1709" height="391" alt="image" src="https://github.com/user-attachments/assets/fb511a63-c345-42a4-bf54-3f4abaa52467" />
+
 
 
 
